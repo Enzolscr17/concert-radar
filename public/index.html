@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concert Radar 🎟</title>
+<style>
+  :root {
+    --bg: #0e1117; --panel: #171c26; --panel2: #1e2532;
+    --text: #e8ecf3; --muted: #8a94a6; --accent: #7c5cff;
+    --ok: #38d39f; --warn: #ffb020; --err: #ff5c7a; --border: #2a3244;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text);
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 24px 16px 60px; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  h1 { font-size: 26px; margin: 0; }
+  h1 .logo { margin-right: 6px; }
+  header .sub { color: var(--muted); font-size: 14px; }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 28px 0 10px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 18px; }
+  form.newwatch { display: grid; grid-template-columns: 1.8fr 1.2fr 1fr 1fr 1.1fr auto; gap: 10px; align-items: end; }
+  @media (max-width: 760px) { form.newwatch { grid-template-columns: 1fr 1fr; } }
+  label { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--muted); }
+  input {
+    background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 9px; padding: 10px 12px; font-size: 14px; width: 100%;
+  }
+  input:focus { outline: none; border-color: var(--accent); }
+  button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 9px;
+    padding: 11px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  button:hover { filter: brightness(1.12); }
+  button.ghost { background: var(--panel2); border: 1px solid var(--border); color: var(--text); font-weight: 500; }
+  button.small { padding: 6px 10px; font-size: 12.5px; }
+  button.danger { background: transparent; border: 1px solid var(--border); color: var(--err); }
+  .watch { display: flex; align-items: center; gap: 12px; padding: 13px 16px; border-bottom: 1px solid var(--border); }
+  .watch:last-child { border-bottom: 0; }
+  .watch .who { font-weight: 650; font-size: 15px; }
+  .watch .meta { color: var(--muted); font-size: 13px; }
+  .watch .spacer { flex: 1; }
+  .badge { font-size: 11.5px; padding: 3px 9px; border-radius: 99px; border: 1px solid var(--border); color: var(--muted); }
+  .badge.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+  .badge.off { color: var(--muted); }
+  .alert { display: flex; gap: 12px; padding: 13px 16px; border-bottom: 1px solid var(--border); align-items: baseline; flex-wrap: wrap; }
+  .alert:last-child { border-bottom: 0; }
+  .alert .price { font-weight: 700; color: var(--ok); white-space: nowrap; }
+  .alert .name { font-weight: 600; }
+  .alert .meta { color: var(--muted); font-size: 13px; }
+  .alert a { color: var(--accent); text-decoration: none; font-weight: 600; white-space: nowrap; }
+  .alert a:hover { text-decoration: underline; }
+  .src { font-size: 11.5px; padding: 2px 8px; border-radius: 99px; background: var(--panel2); border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+  .statusbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .status { display: flex; align-items: center; gap: 7px; background: var(--panel); border: 1px solid var(--border); border-radius: 99px; padding: 7px 14px; font-size: 13px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok { background: var(--ok); } .dot.blocked, .dot.error { background: var(--err); } .dot.unconfigured { background: var(--warn); }
+  .empty { color: var(--muted); padding: 18px; text-align: center; font-size: 14px; }
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+  .note { color: var(--muted); font-size: 12.5px; margin-top: 10px; line-height: 1.5; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--panel2); border: 1px solid var(--border); padding: 11px 18px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .25s; pointer-events: none; max-width: 90vw; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="logo">🎟</span>Concert Radar</h1>
+    <span class="sub">surveillance des places de concert · alertes Telegram</span>
+  </header>
+
+  <div class="card">
+    <form class="newwatch" id="form">
+      <label>Artiste / événement *
+        <input id="artist" placeholder="ex : Justice, Orelsan…" required>
+      </label>
+      <label>Ville ou salle (optionnel)
+        <input id="city" placeholder="ex : Paris, Zénith…">
+      </label>
+      <label>Du (optionnel)
+        <input id="date_from" type="date">
+      </label>
+      <label>Au (optionnel)
+        <input id="date_to" type="date">
+      </label>
+      <label>Catégorie (optionnel)
+        <input id="category" placeholder="ex : fosse, cat 1-2…">
+      </label>
+      <button type="submit">Surveiller</button>
+    </form>
+    <div class="note">Dès qu'une place correspondante apparaît sur une des sources, tu reçois une notification Telegram avec le lien direct.</div>
+  </div>
+
+  <h2>Sources</h2>
+  <div class="statusbar" id="sources"></div>
+  <div class="toolbar">
+    <button class="ghost small" id="scanNow">🔄 Scanner maintenant</button>
+    <button class="ghost small" id="testTg">📨 Tester Telegram</button>
+    <span class="note" id="lastScan"></span>
+  </div>
+
+  <h2>Recherches actives</h2>
+  <div class="card" style="padding:0" id="watches"><div class="empty">Aucune recherche pour l'instant.</div></div>
+
+  <h2>Places trouvées</h2>
+  <div class="card" style="padding:0" id="alerts"><div class="empty">Rien pour l'instant — le radar tourne…</div></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => (s ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let toastTimer;
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
+}
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  let body = {};
+  try { body = await r.json(); } catch {}
+  if (!r.ok) throw new Error(body.error || body.detail || ('HTTP ' + r.status));
+  return body;
+}
+
+const STATE_LABELS = { ok: 'OK', blocked: 'bloqué (anti-bot)', unconfigured: 'à configurer', error: 'erreur' };
+
+function render(st) {
+  // sources
+  $('sources').innerHTML = Object.entries(st.source_labels).map(([name, label]) => {
+    const s = st.source_status[name] || { state: 'unknown' };
+    const txt = STATE_LABELS[s.state] || 'en attente du 1er scan';
+    return `<span class="status" title="${esc(s.detail || '')}"><span class="dot ${esc(s.state)}"></span>${esc(label)} · ${esc(txt)}</span>`;
+  }).join('') + `<span class="status"><span class="dot ${st.telegram_configured ? 'ok' : 'unconfigured'}"></span>Telegram · ${st.telegram_configured ? 'configuré' : 'à configurer'}</span>`;
+
+  $('lastScan').textContent = st.last_scan
+    ? `Dernier scan : ${st.last_scan.replace('T', ' ')} (toutes les ${st.interval_minutes} min)`
+    : 'Premier scan en cours…';
+
+  // watches
+  $('watches').innerHTML = st.watches.length ? st.watches.map(w => {
+    const dates = [w.date_from, w.date_to].filter(Boolean).join(' → ');
+    return `<div class="watch">
+      <div><div class="who">${w.num ? '#' + w.num + ' ' : ''}${esc(w.artist)}</div>
+      <div class="meta">${esc(w.city || 'partout')}${dates ? ' · ' + esc(dates) : ''}${w.category ? ' · 🎫 ' + esc(w.category) : ''}</div></div>
+      <div class="spacer"></div>
+      <span class="badge ${w.active ? 'on' : 'off'}">${w.active ? 'active' : 'en pause'}</span>
+      <button class="ghost small" data-toggle="${w.id}">${w.active ? '⏸' : '▶️'}</button>
+      <button class="danger small" data-del="${w.id}">✕</button>
+    </div>`;
+  }).join('') : '<div class="empty">Aucune recherche pour l\'instant.</div>';
+
+  // alerts
+  $('alerts').innerHTML = st.alerts.length ? st.alerts.map(a => `
+    <div class="alert">
+      <span class="src">${esc(st.source_labels[a.source] || a.source)}</span>
+      <span class="name">${esc(a.event_name)}</span>
+      <span class="meta">${esc([a.date, a.location, a.detail].filter(Boolean).join(' · '))}</span>
+      ${a.price != null ? `<span class="price">${a.price.toFixed(2)} ${esc(a.currency || '€')}</span>` : ''}
+      <a href="${esc(a.url)}" target="_blank" rel="noopener">Voir l'annonce ↗</a>
+    </div>`).join('') : '<div class="empty">Rien pour l\'instant — le radar tourne…</div>';
+
+  document.querySelectorAll('[data-toggle]').forEach(b => b.onclick = async () => {
+    await api(`/api/watches/${b.dataset.toggle}/toggle`, { method: 'POST' }); refresh();
+  });
+  document.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('Supprimer cette recherche (et ses alertes) ?')) return;
+    await api(`/api/watches/${b.dataset.del}`, { method: 'DELETE' }); refresh();
+  });
+}
+
+async function refresh() {
+  try { render(await api('/api/state')); } catch (e) { console.error(e); }
+}
+
+$('form').onsubmit = async ev => {
+  ev.preventDefault();
+  try {
+    await api('/api/watches', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        artist: $('artist').value, city: $('city').value,
+        date_from: $('date_from').value, date_to: $('date_to').value,
+        category: $('category').value,
+      }),
+    });
+    $('form').reset();
+    toast('Recherche ajoutée — scan lancé 🔍');
+    setTimeout(refresh, 1200);
+    refresh();
+  } catch (e) { toast('Erreur : ' + e.message); }
+};
+
+$('scanNow').onclick = async () => {
+  const r = await api('/api/scan', { method: 'POST' });
+  toast(r.started ? 'Scan lancé 🔍' : 'Un scan est déjà en cours…');
+  setTimeout(refresh, 4000);
+};
+
+$('testTg').onclick = async () => {
+  try { await api('/api/test-telegram', { method: 'POST' }); toast('Message de test envoyé ✅'); }
+  catch (e) { toast('Telegram : ' + e.message); }
+};
+
+refresh();
+setInterval(refresh, 15000);
+</script>
+</body>
+</html>
