@@ -51,7 +51,8 @@ def search(watch):
                 "currency": t.get("currency") or "EUR",
                 "url": url,
                 "detail": detail,
-                # texte utilisé pour le filtre par catégorie de la watch
-                "category": " ".join(x for x in [group, cat, zone] if x) or None,
+                # catégorie du billet (filtre + regroupement) ; la zone reste
+                # dans detail pour ne pas éclater les regroupements par siège
+                "category": " · ".join(x for x in [group, cat] if x) or None,
             })
     return listings

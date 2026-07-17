@@ -177,21 +177,62 @@ def _sources_summary():
     return "\n".join(parts)
 
 
+def _fmt_price(p, currency="EUR"):
+    cur = "€" if (currency or "EUR") == "EUR" else currency
+    return ("%.2f %s" % (p, cur)).replace(".00 ", " ")
+
+
+def _alternatives_text(others):
+    """Récap des billets dispo dans les autres catégories, groupé par
+    événement puis catégorie, avec compte et prix minimum."""
+    by_event = {}
+    for l in others:
+        ev_key = (l["event_name"], l.get("date"), l["url"])
+        by_event.setdefault(ev_key, {}).setdefault(
+            l.get("category") or "Autre", []).append(l)
+    lines = ["🎫 <b>Dispo dans d'autres catégories :</b>"]
+    for (name, date, url), cats in list(by_event.items())[:5]:
+        lines.append("\n<b>%s</b>%s" % (name, " — %s" % date if date else ""))
+        for cat, ls in sorted(cats.items()):
+            prices = [l["price"] for l in ls if l.get("price") is not None]
+            p = " · dès %s" % _fmt_price(min(prices), ls[0].get("currency")) if prices else ""
+            lines.append("• %s : %d billet(s)%s" % (cat, len(ls), p))
+        lines.append('👉 <a href="%s">Voir l\'événement</a>' % url)
+    return "\n".join(lines)
+
+
 def _scan_and_report(watch=None):
     """Scanne (tout ou une seule recherche) puis envoie un point à date."""
+    others = []
     try:
-        n = scanner.scan_once([watch] if watch else None)
+        if watch:
+            n, others = scanner.scan_watch(watch)
+        else:
+            n = scanner.scan_once()
     except Exception as e:
         _reply("❌ Le scan a planté : %s" % e)
         return
     label = ("pour <b>%s</b>" % _watch_label(watch)) if watch else ""
     if n:
-        _reply("🎯 <b>%d place(s) trouvée(s)</b> %s — détail juste au-dessus ⤴️\n"
+        _reply("🎯 <b>%d place(s) trouvée(s)</b> %s — prix et liens juste au-dessus ⤴️\n"
                "Je continue de surveiller toutes les %g min." % (n, label, INTERVAL_MIN))
+        return
+    if watch and watch.get("category"):
+        no_cat = dict(watch)
+        no_cat["category"] = ""
+        head = ("📭 Aucun billet « <b>%s</b> » pour <b>%s</b> pour l'instant."
+                % (watch["category"], _watch_label(no_cat)))
     else:
-        _reply("📭 Point à date %s : <b>aucune place dispo pour l'instant</b>.\n%s\n"
-               "⏳ Je re-scanne toutes les %g min, tu recevras une alerte dès que ça tombe."
-               % (label, _sources_summary(), INTERVAL_MIN))
+        head = "📭 Point à date %s : <b>aucune place dispo pour l'instant</b>." % label
+    parts = [head]
+    if others:
+        parts.append("")
+        parts.append(_alternatives_text(others))
+    else:
+        parts.append(_sources_summary())
+    parts.append("⏳ Je re-scanne toutes les %g min, tu recevras une alerte dès que ça tombe."
+                 % INTERVAL_MIN)
+    _reply("\n".join(parts))
 
 def _watch_label(w):
     dates = ""
