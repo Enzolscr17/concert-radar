@@ -23,11 +23,16 @@ def _set_status(db, name, state, detail=""):
     }
 
 
-def scan_once():
-    """Un cycle complet. Retourne le nombre de nouvelles alertes."""
+def scan_once(only_watches=None):
+    """Un cycle de scan. `only_watches` permet de ne scanner que certaines
+    recherches (ex: celle qui vient d'être créée). Retourne le nombre de
+    nouvelles alertes."""
     db = store.get_db()
-    with store.lock():
-        watches = [w for w in db["watches"] if w.get("active")]
+    if only_watches is not None:
+        watches = [w for w in only_watches if w.get("active")]
+    else:
+        with store.lock():
+            watches = [w for w in db["watches"] if w.get("active")]
     new_alerts = 0
 
     for src in SOURCES:

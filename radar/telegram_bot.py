@@ -7,6 +7,7 @@
 #   /scan                             -> lance un scan immédiat
 #   /aide                             -> aide
 import json
+import os
 import re
 import threading
 import time
@@ -159,6 +160,39 @@ def parse_watch_message(text):
 
 # ---------- actions ----------
 
+INTERVAL_MIN = float(os.environ.get("CHECK_INTERVAL_MINUTES", "5"))
+
+
+def _sources_summary():
+    db = store.get_db()
+    with store.lock():
+        status = dict(db["source_status"])
+    ok = [scanner.LABELS.get(k, k) for k, v in status.items() if v.get("state") == "ok"]
+    ko = [scanner.LABELS.get(k, k) for k, v in status.items() if v.get("state") != "ok"]
+    parts = []
+    if ok:
+        parts.append("✅ scanné : " + ", ".join(ok))
+    if ko:
+        parts.append("⚠️ indispo : " + ", ".join(ko))
+    return "\n".join(parts)
+
+
+def _scan_and_report(watch=None):
+    """Scanne (tout ou une seule recherche) puis envoie un point à date."""
+    try:
+        n = scanner.scan_once([watch] if watch else None)
+    except Exception as e:
+        _reply("❌ Le scan a planté : %s" % e)
+        return
+    label = ("pour <b>%s</b>" % _watch_label(watch)) if watch else ""
+    if n:
+        _reply("🎯 <b>%d place(s) trouvée(s)</b> %s — détail juste au-dessus ⤴️\n"
+               "Je continue de surveiller toutes les %g min." % (n, label, INTERVAL_MIN))
+    else:
+        _reply("📭 Point à date %s : <b>aucune place dispo pour l'instant</b>.\n%s\n"
+               "⏳ Je re-scanne toutes les %g min, tu recevras une alerte dès que ça tombe."
+               % (label, _sources_summary(), INTERVAL_MIN))
+
 def _watch_label(w):
     dates = ""
     if w.get("date_from"):
@@ -241,8 +275,8 @@ def handle_text(text):
         return
 
     if low == "/scan":
-        threading.Thread(target=scanner.scan_once, daemon=True).start()
-        _reply("🔄 Scan lancé ! Je t'écris si je trouve quelque chose de nouveau.")
+        _reply("🔄 Scan de toutes les recherches en cours…")
+        threading.Thread(target=_scan_and_report, daemon=True).start()
         return
 
     if low.startswith("/"):
@@ -254,9 +288,9 @@ def handle_text(text):
         _reply("Je n'ai pas compris 🤔 — envoie <code>artiste, ville, date</code>. /aide pour des exemples.")
         return
     watch = create_watch(parsed)
-    _reply("✅ Recherche <b>#%d</b> créée : %s\n🔎 Premier scan lancé…"
+    _reply("✅ Recherche <b>#%d</b> créée : %s\n🔎 Premier scan en cours…"
            % (watch["num"], _watch_label(watch)))
-    threading.Thread(target=scanner.scan_once, daemon=True).start()
+    threading.Thread(target=_scan_and_report, args=(watch,), daemon=True).start()
 
 
 # ---------- boucle de long polling ----------
