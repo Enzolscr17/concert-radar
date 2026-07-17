@@ -41,7 +41,7 @@ HELP = (
     "Catégories comprises : fosse, cat 1-2-3-4, carré or, pelouse, "
     "gradins, tribune, VIP, debout, assis…\n\n"
     "📋 /concert — liste des recherches\n"
-    "🗑 /suppr <code>N</code> — supprime la recherche n°N\n"
+    "🗑 /suppr — supprimer une recherche (boutons à toucher)\n"
     "🔄 /scan — scan immédiat\n"
     "❓ /aide — cette aide"
 )
@@ -58,10 +58,13 @@ def _api(method, **params):
         return json.load(r)
 
 
-def _reply(text):
+def _reply(text, keyboard=None):
     try:
-        _api("sendMessage", chat_id=notify._conf()[1], text=text,
-             parse_mode="HTML", disable_web_page_preview=True)
+        params = dict(chat_id=notify._conf()[1], text=text,
+                      parse_mode="HTML", disable_web_page_preview=True)
+        if keyboard:
+            params["reply_markup"] = {"inline_keyboard": keyboard}
+        _api("sendMessage", **params)
     except Exception as e:
         print("[telegram-bot] envoi impossible:", e)
 
@@ -293,8 +296,19 @@ def handle_text(text):
             state = "" if w.get("active") else " ⏸"
             found = " — 🎟 %d trouvée(s)" % n_alerts if n_alerts else ""
             lines.append("<b>#%s</b> %s%s%s" % (w.get("num", "?"), _watch_label(w), state, found))
-        lines.append("\n🗑 /suppr <code>N</code> pour supprimer · /scan pour scanner")
+        lines.append("\n🗑 /suppr pour supprimer · /scan pour scanner")
         _reply("\n".join(lines))
+        return
+
+    if low in ("/suppr", "/supprimer", "/del", "/delete"):
+        db = store.get_db()
+        with store.lock():
+            watches = list(db["watches"])
+        if not watches:
+            _reply("Aucune recherche à supprimer.")
+            return
+        _reply("🗑 <b>Touche une recherche pour la supprimer :</b>",
+               keyboard=_delete_keyboard(watches))
         return
 
     m = re.match(r"^/(suppr|supprimer|del|delete)\s+#?(\d+)$", low)
@@ -334,6 +348,64 @@ def handle_text(text):
     threading.Thread(target=_scan_and_report, args=(watch,), daemon=True).start()
 
 
+def _delete_keyboard(watches):
+    """Un bouton par recherche ; callback_data = 'del:<id>' (max 64 octets)."""
+    rows = []
+    for w in watches:
+        label = "❌ #%s %s" % (w.get("num", "?"), _watch_label(w))
+        rows.append([{"text": label[:60], "callback_data": "del:%s" % w["id"]}])
+    return rows
+
+
+def _delete_watch_by_id(wid):
+    db = store.get_db()
+    with store.lock():
+        target = next((w for w in db["watches"] if w["id"] == wid), None)
+        if target:
+            db["watches"] = [w for w in db["watches"] if w["id"] != wid]
+            db["alerts"] = [a for a in db["alerts"] if a.get("watch_id") != wid]
+            db["seen"] = {k: v for k, v in db["seen"].items()
+                          if not k.startswith(wid + ":")}
+            store.save()
+    return target
+
+
+def handle_callback(cb):
+    """Réagit aux boutons ❌ du /suppr."""
+    data = cb.get("data") or ""
+    if not data.startswith("del:"):
+        return
+    target = _delete_watch_by_id(data[4:])
+    try:
+        _api("answerCallbackQuery", callback_query_id=cb["id"],
+             text="Supprimée ✅" if target else "Déjà supprimée")
+    except Exception:
+        pass
+    # Met à jour le message : liste restante ou confirmation finale
+    msg = cb.get("message") or {}
+    if not msg.get("message_id"):
+        return
+    db = store.get_db()
+    with store.lock():
+        watches = list(db["watches"])
+    try:
+        params = dict(chat_id=msg["chat"]["id"], message_id=msg["message_id"],
+                      parse_mode="HTML")
+        if target:
+            done = "🗑 Recherche <b>#%s</b> supprimée (%s)." % (
+                target.get("num", "?"), _watch_label(target))
+        else:
+            done = "🗑"
+        if watches:
+            params["text"] = done + "\n\n<b>Touche une recherche pour la supprimer :</b>"
+            params["reply_markup"] = {"inline_keyboard": _delete_keyboard(watches)}
+        else:
+            params["text"] = done + "\n\nPlus aucune recherche active."
+        _api("editMessageText", **params)
+    except Exception as e:
+        print("[telegram-bot] edit impossible:", e)
+
+
 # ---------- boucle de long polling ----------
 
 def run_forever():
@@ -357,6 +429,11 @@ def run_forever():
             updates = _api("getUpdates", **params).get("result", [])
             for upd in updates:
                 offset = upd["update_id"] + 1
+                cb = upd.get("callback_query")
+                if cb:
+                    if str((cb.get("from") or {}).get("id")) == str(chat_id):
+                        handle_callback(cb)
+                    continue
                 msg = upd.get("message") or {}
                 chat = msg.get("chat") or {}
                 if str(chat.get("id")) != str(chat_id):
