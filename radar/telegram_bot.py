@@ -205,37 +205,52 @@ def _alternatives_text(others):
 
 
 def _scan_and_report(watch=None):
-    """Scanne (tout ou une seule recherche) puis envoie un point à date."""
-    others = []
+    """Scanne (une recherche ou toutes) puis envoie un point à date complet,
+    alternatives par catégorie comprises."""
+    db = store.get_db()
+    if watch:
+        targets = [watch]
+    else:
+        with store.lock():
+            targets = [w for w in db["watches"] if w.get("active")]
+    if not targets:
+        _reply("Aucune recherche active. Envoie <code>artiste, ville, date</code> pour en créer une.")
+        return
+
+    total = 0
+    alt_blocks = []
     try:
-        if watch:
-            n, others = scanner.scan_watch(watch)
-        else:
-            n = scanner.scan_once()
+        for w in targets:
+            n, others = scanner.scan_watch(w)
+            total += n
+            if n == 0 and others:
+                no_cat = dict(w)
+                no_cat["category"] = ""
+                head = ("📭 Rien en « <b>%s</b> » pour <b>%s</b>."
+                        % (w["category"], _watch_label(no_cat)))
+                alt_blocks.append(head + "\n" + _alternatives_text(others))
     except Exception as e:
         _reply("❌ Le scan a planté : %s" % e)
         return
-    label = ("pour <b>%s</b>" % _watch_label(watch)) if watch else ""
-    if n:
-        _reply("🎯 <b>%d place(s) trouvée(s)</b> %s — prix et liens juste au-dessus ⤴️\n"
-               "Je continue de surveiller toutes les %g min." % (n, label, INTERVAL_MIN))
-        return
-    if watch and watch.get("category"):
-        no_cat = dict(watch)
-        no_cat["category"] = ""
-        head = ("📭 Aucun billet « <b>%s</b> » pour <b>%s</b> pour l'instant."
-                % (watch["category"], _watch_label(no_cat)))
+
+    parts = []
+    if total:
+        parts.append("🎯 <b>%d place(s) trouvée(s)</b> — prix et liens juste au-dessus ⤴️"
+                     % total)
+    elif watch:
+        label = "pour <b>%s</b>" % _watch_label(watch)
+        if not alt_blocks:
+            parts.append("📭 Point à date %s : <b>aucune place dispo pour l'instant</b>."
+                         % label)
+            parts.append(_sources_summary())
     else:
-        head = "📭 Point à date %s : <b>aucune place dispo pour l'instant</b>." % label
-    parts = [head]
-    if others:
-        parts.append("")
-        parts.append(_alternatives_text(others))
-    else:
-        parts.append(_sources_summary())
+        if not alt_blocks:
+            parts.append("📭 <b>Rien de nouveau</b> sur tes %d recherche(s)." % len(targets))
+            parts.append(_sources_summary())
+    parts.extend(alt_blocks)
     parts.append("⏳ Je re-scanne toutes les %g min, tu recevras une alerte dès que ça tombe."
                  % INTERVAL_MIN)
-    _reply("\n".join(parts))
+    _reply("\n\n".join(p for p in parts if p))
 
 def _watch_label(w):
     dates = ""
